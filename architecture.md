@@ -55,3 +55,4 @@
 | 7 | `snowflake/05_cortex_agent.sql` | Wire up Cortex Agent with both tools |
 | 8 | `streamlit/streamlit_app.py` | Deploy the chat UI |
 
+Can also be run as per the sequence mentioned in README
