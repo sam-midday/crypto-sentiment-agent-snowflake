@@ -11,10 +11,12 @@ import requests
 import snowflake.connector
 from datetime import datetime, timezone
 
+# ─── CONFIG ──────────────────────────────────────────────────
+# Update these with your Snowflake credentials
 SNOWFLAKE_CONFIG = {
-    "account":   "YOUR_ACCOUNT",
-    "user":      "YOUR_USERNAME",
-    "password":  "YOUR_PASSWORD",
+    "account":   "hbehfmd-wzc22231",      # e.g. "abc12345.us-east-1"
+    "user":      "sammidday03",
+    "password":  "SamMidday@88985",
     "warehouse": "CRYPTO_WH",
     "database":  "CRYPTO_SENTIMENT_DB",
     "schema":    "ANALYTICS",
@@ -22,9 +24,11 @@ SNOWFLAKE_CONFIG = {
 
 COINS = ["bitcoin", "ethereum", "solana", "cardano", "dogecoin"]
 HN_SEARCH_TERMS = ["crypto", "bitcoin", "ethereum", "blockchain", "defi", "AI"]
+# ─────────────────────────────────────────────────────────────
 
 
 def fetch_crypto_prices():
+    """Fetch current prices from CoinGecko (free, no API key needed)."""
     url = "https://api.coingecko.com/api/v3/coins/markets"
     params = {
         "vs_currency": "usd",
@@ -51,146 +55,161 @@ def fetch_crypto_prices():
             coin.get("market_cap"),
             coin.get("total_volume"),
             coin.get("price_change_percentage_24h"),
-            coin.get("high_24h"),
-            coin.get("low_24h"),
         ))
+    print(f"Fetched prices for {len(rows)} coins")
     return rows
 
 
-def fetch_hackernews_articles():
+def fetch_hackernews_stories():
+    """Fetch top stories from HackerNews (completely free, no auth)."""
+    top_url = "https://hacker-news.firebaseio.com/v0/topstories.json"
+    resp = requests.get(top_url, timeout=30)
+    resp.raise_for_status()
+    story_ids = resp.json()[:100]
+
     rows = []
-    seen = set()
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-    for term in HN_SEARCH_TERMS:
-        url = "https://hn.algolia.com/api/v1/search_by_date"
-        params = {"query": term, "tags": "story", "hitsPerPage": 10}
-        resp = requests.get(url, params=params, timeout=30)
-        resp.raise_for_status()
-        hits = resp.json().get("hits", [])
-
-        for h in hits:
-            story_id = str(h.get("objectID", ""))
-            if story_id in seen:
+    for sid in story_ids:
+        try:
+            detail = requests.get(
+                f"https://hacker-news.firebaseio.com/v0/item/{sid}.json",
+                timeout=10
+            ).json()
+            if not detail or detail.get("type") != "story":
                 continue
-            seen.add(story_id)
 
-            title = h.get("title") or ""
-            article_url = h.get("url") or ""
-            author = h.get("author") or ""
-            points = h.get("points") or 0
-            num_comments = h.get("num_comments") or 0
-            created_at = h.get("created_at") or today
+            title = (detail.get("title") or "").lower()
+            text = detail.get("text") or detail.get("title") or ""
 
-            content = f"{title}. Source: HackerNews. Author: {author}. Points: {points}."
+            is_relevant = any(term in title for term in
+                             ["crypto", "bitcoin", "btc", "ethereum", "eth",
+                              "blockchain", "defi", "solana", "cardano",
+                              "dogecoin", "nft", "web3", "ai ", "openai",
+                              "llm", "gpu", "nvidia", "machine learning"])
+            if not is_relevant:
+                continue
+
+            category = "crypto"
+            if any(t in title for t in ["ai ", "openai", "llm", "gpu",
+                                         "nvidia", "machine learning"]):
+                category = "AI"
+            elif any(t in title for t in ["python", "rust", "linux",
+                                           "github", "programming"]):
+                category = "tech"
+
+            published = datetime.fromtimestamp(
+                detail.get("time", 0), tz=timezone.utc
+            ).strftime("%Y-%m-%d %H:%M:%S")
 
             rows.append((
-                story_id,
-                title,
-                article_url,
-                author,
-                points,
-                num_comments,
-                created_at,
-                today,
-                content,
-                term,
+                detail["id"],
+                detail.get("title", "")[:1000],
+                detail.get("url", "")[:2000],
+                detail.get("by", "unknown")[:200],
+                detail.get("score", 0),
+                detail.get("descendants", 0),
+                text[:16000],
+                published,
+                category,
             ))
+        except Exception as e:
+            print(f"  Skipping story {sid}: {e}")
+            continue
+
+    print(f"Fetched {len(rows)} relevant stories from HackerNews")
     return rows
 
 
-def upsert_crypto_prices(conn, rows):
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TEMPORARY TABLE CRYPTO_PRICES_STAGING LIKE CRYPTO_SENTIMENT_DB.ANALYTICS.CRYPTO_PRICES
-    """)
-    cur.executemany("""
-        INSERT INTO CRYPTO_PRICES_STAGING
-            (COIN_ID, COIN_NAME, SYMBOL, PRICE_DATE, CURRENT_PRICE,
-             MARKET_CAP, TOTAL_VOLUME, PRICE_CHANGE_PCT_24H, HIGH_24H, LOW_24H)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, rows)
-    cur.execute("""
-        MERGE INTO CRYPTO_SENTIMENT_DB.ANALYTICS.CRYPTO_PRICES AS tgt
-        USING CRYPTO_PRICES_STAGING AS src
-          ON tgt.COIN_ID = src.COIN_ID AND tgt.PRICE_DATE = src.PRICE_DATE
-        WHEN MATCHED THEN UPDATE SET
-          tgt.CURRENT_PRICE         = src.CURRENT_PRICE,
-          tgt.MARKET_CAP            = src.MARKET_CAP,
-          tgt.TOTAL_VOLUME          = src.TOTAL_VOLUME,
-          tgt.PRICE_CHANGE_PCT_24H  = src.PRICE_CHANGE_PCT_24H,
-          tgt.HIGH_24H              = src.HIGH_24H,
-          tgt.LOW_24H               = src.LOW_24H
-        WHEN NOT MATCHED THEN INSERT
-          (COIN_ID, COIN_NAME, SYMBOL, PRICE_DATE, CURRENT_PRICE,
-           MARKET_CAP, TOTAL_VOLUME, PRICE_CHANGE_PCT_24H, HIGH_24H, LOW_24H)
-        VALUES
-          (src.COIN_ID, src.COIN_NAME, src.SYMBOL, src.PRICE_DATE, src.CURRENT_PRICE,
-           src.MARKET_CAP, src.TOTAL_VOLUME, src.PRICE_CHANGE_PCT_24H, src.HIGH_24H, src.LOW_24H)
-    """)
-    print(f"  Upserted {len(rows)} crypto price rows.")
-    cur.close()
-
-
-def upsert_tech_news(conn, rows):
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TEMPORARY TABLE TECH_NEWS_STAGING LIKE CRYPTO_SENTIMENT_DB.ANALYTICS.TECH_NEWS
-    """)
-    cur.executemany("""
-        INSERT INTO TECH_NEWS_STAGING
-            (STORY_ID, TITLE, URL, AUTHOR, POINTS, NUM_COMMENTS,
-             CREATED_AT, LOAD_DATE, CONTENT, SEARCH_TERM)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, rows)
-    cur.execute("""
-        MERGE INTO CRYPTO_SENTIMENT_DB.ANALYTICS.TECH_NEWS AS tgt
-        USING TECH_NEWS_STAGING AS src
-          ON tgt.STORY_ID = src.STORY_ID
-        WHEN MATCHED THEN UPDATE SET
-          tgt.TITLE        = src.TITLE,
-          tgt.URL          = src.URL,
-          tgt.AUTHOR       = src.AUTHOR,
-          tgt.POINTS       = src.POINTS,
-          tgt.NUM_COMMENTS = src.NUM_COMMENTS,
-          tgt.CONTENT      = src.CONTENT,
-          tgt.SEARCH_TERM  = src.SEARCH_TERM
-        WHEN NOT MATCHED THEN INSERT
-          (STORY_ID, TITLE, URL, AUTHOR, POINTS, NUM_COMMENTS,
-           CREATED_AT, LOAD_DATE, CONTENT, SEARCH_TERM)
-        VALUES
-          (src.STORY_ID, src.TITLE, src.URL, src.AUTHOR, src.POINTS, src.NUM_COMMENTS,
-           src.CREATED_AT, src.LOAD_DATE, src.CONTENT, src.SEARCH_TERM)
-    """)
-    print(f"  Upserted {len(rows)} tech news rows.")
-    cur.close()
-
-
-def main():
-    print("=" * 60)
-    print("Crypto Sentiment Agent - Data Loader")
-    print("=" * 60)
-
-    print("\n[1/4] Fetching crypto prices from CoinGecko...")
-    crypto_rows = fetch_crypto_prices()
-    print(f"  Fetched {len(crypto_rows)} coins.")
-
-    print("\n[2/4] Fetching tech news from HackerNews...")
-    news_rows = fetch_hackernews_articles()
-    print(f"  Fetched {len(news_rows)} articles.")
-
-    print("\n[3/4] Connecting to Snowflake...")
+def load_to_snowflake(price_rows, news_rows):
+    """Load data into Snowflake tables using MERGE (upsert) to avoid duplicates."""
     conn = snowflake.connector.connect(**SNOWFLAKE_CONFIG)
-    print("  Connected.")
+    cur = conn.cursor()
 
-    print("\n[4/4] Loading data into Snowflake...")
-    upsert_crypto_prices(conn, crypto_rows)
-    upsert_tech_news(conn, news_rows)
+    try:
+        # ── Load crypto prices (MERGE = insert or update) ──
+        if price_rows:
+            cur.execute("""
+                CREATE OR REPLACE TEMPORARY TABLE CRYPTO_SENTIMENT_DB.ANALYTICS.PRICES_STAGING (
+                    COIN_ID VARCHAR, COIN_NAME VARCHAR, SYMBOL VARCHAR,
+                    PRICE_DATE DATE, PRICE_USD FLOAT, MARKET_CAP_USD FLOAT,
+                    VOLUME_USD FLOAT, PRICE_CHANGE_PCT_24H FLOAT
+                )
+            """)
+            cur.executemany(
+                "INSERT INTO CRYPTO_SENTIMENT_DB.ANALYTICS.PRICES_STAGING VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                price_rows
+            )
+            cur.execute("""
+                MERGE INTO CRYPTO_SENTIMENT_DB.ANALYTICS.CRYPTO_PRICES t
+                USING CRYPTO_SENTIMENT_DB.ANALYTICS.PRICES_STAGING s
+                ON t.COIN_ID = s.COIN_ID AND t.PRICE_DATE = s.PRICE_DATE
+                WHEN MATCHED THEN UPDATE SET
+                    t.PRICE_USD = s.PRICE_USD, t.MARKET_CAP_USD = s.MARKET_CAP_USD,
+                    t.VOLUME_USD = s.VOLUME_USD, t.PRICE_CHANGE_PCT_24H = s.PRICE_CHANGE_PCT_24H,
+                    t.LOADED_AT = CURRENT_TIMESTAMP()
+                WHEN NOT MATCHED THEN INSERT
+                    (COIN_ID, COIN_NAME, SYMBOL, PRICE_DATE, PRICE_USD,
+                     MARKET_CAP_USD, VOLUME_USD, PRICE_CHANGE_PCT_24H)
+                VALUES (s.COIN_ID, s.COIN_NAME, s.SYMBOL, s.PRICE_DATE,
+                        s.PRICE_USD, s.MARKET_CAP_USD, s.VOLUME_USD, s.PRICE_CHANGE_PCT_24H)
+            """)
+            print(f"Merged {len(price_rows)} price records")
 
-    conn.close()
-    print("\nDone!")
+        # ── Load news (MERGE to avoid duplicate story IDs) ──
+        if news_rows:
+            cur.execute("""
+                CREATE OR REPLACE TEMPORARY TABLE CRYPTO_SENTIMENT_DB.ANALYTICS.NEWS_STAGING (
+                    STORY_ID NUMBER, TITLE VARCHAR, URL VARCHAR, AUTHOR VARCHAR,
+                    SCORE NUMBER, NUM_COMMENTS NUMBER, STORY_TEXT VARCHAR,
+                    PUBLISHED_AT TIMESTAMP_NTZ, CATEGORY VARCHAR
+                )
+            """)
+            cur.executemany(
+                "INSERT INTO CRYPTO_SENTIMENT_DB.ANALYTICS.NEWS_STAGING VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                news_rows
+            )
+            cur.execute("""
+                MERGE INTO CRYPTO_SENTIMENT_DB.ANALYTICS.TECH_NEWS t
+                USING CRYPTO_SENTIMENT_DB.ANALYTICS.NEWS_STAGING s
+                ON t.STORY_ID = s.STORY_ID
+                WHEN NOT MATCHED THEN INSERT
+                    (STORY_ID, TITLE, URL, AUTHOR, SCORE, NUM_COMMENTS,
+                     STORY_TEXT, PUBLISHED_AT, CATEGORY)
+                VALUES (s.STORY_ID, s.TITLE, s.URL, s.AUTHOR, s.SCORE,
+                        s.NUM_COMMENTS, s.STORY_TEXT, s.PUBLISHED_AT, s.CATEGORY)
+            """)
+            print(f"Merged {len(news_rows)} news records")
+
+        # ── Run sentiment on new articles ──
+        cur.execute("""
+            UPDATE CRYPTO_SENTIMENT_DB.ANALYTICS.TECH_NEWS
+            SET SENTIMENT_SCORE = SNOWFLAKE.CORTEX.SENTIMENT(STORY_TEXT),
+                SENTIMENT_LABEL = CASE
+                    WHEN SNOWFLAKE.CORTEX.SENTIMENT(STORY_TEXT) >= 0.3 THEN 'Positive'
+                    WHEN SNOWFLAKE.CORTEX.SENTIMENT(STORY_TEXT) <= -0.3 THEN 'Negative'
+                    ELSE 'Neutral'
+                END
+            WHERE SENTIMENT_SCORE IS NULL AND STORY_TEXT IS NOT NULL
+        """)
+        print("Sentiment scoring complete")
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 if __name__ == "__main__":
-    main()
+    print("=== Crypto Sentiment Agent - Data Loader ===")
+    print(f"Run time: {datetime.now(timezone.utc).isoformat()}")
+    print()
 
+    print("[1/3] Fetching crypto prices from CoinGecko...")
+    prices = fetch_crypto_prices()
+
+    print("[2/3] Fetching tech news from HackerNews...")
+    news = fetch_hackernews_stories()
+
+    print("[3/3] Loading into Snowflake...")
+    load_to_snowflake(prices, news)
+
+    print()
+    print("Done! Your data is fresh.")
