@@ -31,3 +31,44 @@ An end-to-end Agentic AI application built on **Snowflake Cortex** that combines
 - Snowflake account (trial works for most features)
 - Python 3.8+
 - `pip install snowflake-connector-python requests`
+
+### Step 1: Create Snowflake Objects
+Run the SQL scripts in order:
+```bash
+# In Snowflake worksheet, execute:
+snowflake/01_setup.sql
+snowflake/02_tables.sql
+snowflake/03_semantic_view.sql
+snowflake/04_cortex_search.sql
+snowflake/05_cortex_agent.sql
+snowflake/06_sentiment_scoring.sql
+```
+
+### Step 2: Load Data
+```bash
+cd data_loader
+pip install -r requirements.txt
+# Edit load_crypto_data.py with your Snowflake credentials
+python load_crypto_data.py
+```
+
+### Step 3: Launch the App
+Create a Streamlit app in Snowflake and paste the code from ```streamlit/streamlit_app.py```
+
+### 📸 Demo
+|Ask about prices|Ask about news|
+|---|---|
+|![Price Query](screenshots/crypto_query.png)|![News Query](screenshots/news_query.png)|
+
+### 🧠 What I Learned
+- Building Semantic Views to enable natural-language-to-SQL translation
+- Creating Cortex Search Services for semantic search over unstructured text
+- Orchestrating multiple AI tools with Cortex Agent
+- Using CORTEX.SENTIMENT() for zero-setup sentiment analysis
+- Designing MERGE-based ETL pipelines to avoid duplicate data
+- Building interactive apps with Streamlit in Snowflake
+
+### 📬 Any Question?
+Feel free to contact me.
+
+Samsuddin Midday — [LinkedIn](https://www.linkedin.com/in/samsuddin-midday/) | [Email](samsuddin.midday.ge@gmail.com)
