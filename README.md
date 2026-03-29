@@ -71,4 +71,4 @@ Create a Streamlit app in Snowflake and paste the code from ```streamlit/streaml
 ### 📬 Any Question?
 Feel free to contact me.
 
-Samsuddin Midday — [LinkedIn](https://www.linkedin.com/in/samsuddin-midday/) | [Email](samsuddin.midday.ge@gmail.com)
+Samsuddin Midday — [LinkedIn](https://www.linkedin.com/in/samsuddin-midday/) | [Email](mailto:samsuddin.midday.ge@gmail.com)
