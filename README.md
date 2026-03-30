@@ -68,7 +68,7 @@ Create a Streamlit app in Snowflake and paste the code from ```streamlit/streaml
 - Designing MERGE-based ETL pipelines to avoid duplicate data
 - Building interactive apps with Streamlit in Snowflake
 
-### 📬 Any Question?
+### 📬 Any Questions?
 Feel free to contact me.
 
 Samsuddin Midday — [LinkedIn](https://www.linkedin.com/in/samsuddin-midday/) | [Email](mailto:samsuddin.midday.ge@gmail.com)
