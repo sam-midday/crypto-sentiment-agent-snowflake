@@ -14,12 +14,12 @@ from datetime import datetime, timezone
 # ─── CONFIG ──────────────────────────────────────────────────
 # Update these with your Snowflake credentials
 SNOWFLAKE_CONFIG = {
-    "account":   "hbehfmd-wzc22231",      # e.g. "abc12345.us-east-1"
-    "user":      "sammidday03",
-    "password":  "SamMidday@88985",
-    "warehouse": "CRYPTO_WH",
-    "database":  "CRYPTO_SENTIMENT_DB",
-    "schema":    "ANALYTICS",
+    "account":   "<account-identifier>",      # e.g. "abc12345.us-east-1"
+    "user":      "username",
+    "password":  "password",
+    "warehouse": "WAREHOUSE",
+    "database":  "DATABASE",
+    "schema":    "SCHEMA",
 }
 
 COINS = ["bitcoin", "ethereum", "solana", "cardano", "dogecoin"]
